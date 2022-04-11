@@ -8,10 +8,16 @@ from torch.autograd import Variable
 
 from model.retinanet import retinanet_from_backbone
 
+import torch._C as _C
+from distutils.command.check import check
+
+TrainingMode = _C._onnx.TrainingMode
+OperatorExportTypes = _C._onnx.OperatorExportTypes
+
 def parse_args(add_help=True):
     parser = argparse.ArgumentParser(description='Convert PyTorch detection file to onnx format', add_help=add_help)
 
-    parser.add_argument('--input', required=True, help='input pth file')
+    parser.add_argument('--input', required=False, help='input pth file')
     parser.add_argument('--output', default=None, help='output onnx file')
 
     parser.add_argument('--backbone', default='resnext50_32x4d',
@@ -32,12 +38,13 @@ def parse_args(add_help=True):
 
     args = parser.parse_args()
 
-    args.output = args.output or (f'{args.backbone}_c{args.num_classes}_bs{args.batch_size}_inference.onnx')
+    args.output = args.output or (f'/home/parallels/github/farshad-t/frameworks.ai.benchmarking.archbench-1/networks/WIP_networks/{args.backbone}_fpn_c{args.num_classes}_bs{args.batch_size}_training.onnx')
     return args
 
 def main(args):
     batch_size = args.batch_size or 1
     image_size = args.image_size or [800, 800]
+    nc = args.num_classes
 
     print("Creating model")
     model = retinanet_from_backbone(backbone=args.backbone,
@@ -54,11 +61,13 @@ def main(args):
     #model.load_state_dict(checkpoint['model'])
 
     print("Creating input tensor")
-    rand = torch.randn(batch_size, 3, image_size[0], image_size[1],
+    inputs = []
+    for b in range(batch_size):
+        rand = torch.rand((3, image_size[0], image_size[1]),
                        device=device,
                        requires_grad=False,
                        dtype=torch.float)
-    inputs = torch.autograd.Variable(rand)
+        inputs.append(rand)
     # Output dynamic axes
     dynamic_axes = {
         'boxes': {0 : 'num_detections'},
@@ -66,28 +75,44 @@ def main(args):
         'labels': {0 : 'num_detections'},
     }
     # Input dynamic axes
-    if (args.batch_size is None) or (args.image_size is None):
+    if (batch_size is None) or (image_size is None):
         dynamic_axes['images'] = {}
-        if args.batch_size is None:
+        if batch_size is None:
             dynamic_axes['images'][0]: 'batch_size'
-        if args.image_size is None:
+        if image_size is None:
             dynamic_axes['images'][2] = 'width'
             dynamic_axes['images'][3] = 'height'
+    
+    targets = []
+    for n in range(batch_size):
+        num_of_objects = torch.randint(10,(1,))
+        no = 10 #int(num_of_objects)
+        targets.append({'boxes':torch.randint(image_size[0]//2,(no, 4))+torch.tensor([0,0,image_size[0]/2,image_size[0]/2]), 
+                        'labels':torch.randint(1, nc,(no,))})
 
 
-    print("Exporting the model")
-    model.eval()
+
+    print("Exporting the model:"+args.output)
     torch.onnx.export(model,
-                      inputs,
+                      (inputs, targets),
+                      #(inputs, [{'boxes':torch.randn(0,4), 'labels':[torch.randn(0)]}]),
                       args.output,
-                      export_params=True,
+                      export_params=True, #export trained params
                       opset_version=13,
-                      do_constant_folding=False,
-                      input_names=['images'],
-                      output_names=['boxes', 'scores', 'labels'],
-                      dynamic_axes=dynamic_axes)
+                      do_constant_folding=True,
+                      input_names=['images', 'targets'],
+                      output_names=['losses', 'detections'],
+                      dynamic_axes=dynamic_axes,
+                      training=TrainingMode.TRAINING,
+                      operator_export_type=OperatorExportTypes.ONNX_FALLTHROUGH,
+                      keep_initializers_as_inputs=False)
+
+#                       operator_export_type=OperatorExportTypes.ONNX)
+#                       operator_export_type=OperatorExportTypes.ONNX_FALLTHROUGH)
+#                       operator_export_type=OperatorExportTypes.ONNX_ATEN)
 
 
 if __name__ == "__main__":
     args = parse_args()
     main(args)
+    print("done")
