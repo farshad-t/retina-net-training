@@ -63,13 +63,13 @@ def main(args):
     #model.load_state_dict(checkpoint['model'])
 
     print("Creating input tensor")
-    inputs = []
-    for b in range(batch_size):
-        rand = torch.rand((3, image_size[0], image_size[1]),
-                       device=device,
-                       requires_grad=False,
-                       dtype=torch.float)
-        inputs.append(rand)
+
+    inputs = torch.randn(batch_size, 3, image_size[0], image_size[1],
+               device=device,
+               requires_grad=False,
+               dtype=torch.float)
+
+
     # Output dynamic axes
     dynamic_axes = {
         'boxes': {0 : 'num_detections'},
@@ -86,12 +86,11 @@ def main(args):
             dynamic_axes['images'][3] = 'height'
     
     targets = []
-    for n in range(batch_size):
-        no = args.num_obj
-        targets.append({'boxes':torch.randint(image_size[0]//2,(no, 4))+torch.tensor([0,0,image_size[0]/2,image_size[0]/2]), 
-                        'labels':torch.randint(1, nc,(no,))})
-
-
+    no = args.num_obj
+    const_base = torch.tensor([0,0,image_size[0]/2,image_size[0]/2])
+    constant_tensor = const_base * torch.ones(batch_size, no, 4)
+    targets.append({'boxes':torch.randint(batch_size, image_size[0]//2,(batch_size, no, 4)) + constant_tensor, 
+                    'labels':torch.randint(nc,(batch_size, no,))})
 
     print("Exporting the model:"+args.output)
     torch.onnx.export(model,
