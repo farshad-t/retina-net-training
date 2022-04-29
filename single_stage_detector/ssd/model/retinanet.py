@@ -49,14 +49,17 @@ class RetinaNetHead(nn.Module):
         super().__init__()
         self.classification_head = RetinaNetClassificationHead(in_channels, num_anchors, num_classes,
             module_name="module.head.classification_head")
+        self.classification_head_loss = RetinaNetClassificationHeadLoss()
         self.regression_head = RetinaNetRegressionHead(in_channels, num_anchors,
             module_name="module.head.regression_head")
+        self.regression_head_loss = RetinaNetRegressionHeadLoss(self.regression_head)
+
 
     def compute_loss(self, targets, head_outputs, anchors, matched_idxs):
         # type: (List[Dict[str, Tensor]], Dict[str, Tensor], List[Tensor], List[Tensor]) -> Dict[str, Tensor]
         return {
-            'classification': self.classification_head.compute_loss(targets, head_outputs, matched_idxs),
-            'bbox_regression': self.regression_head.compute_loss(targets, head_outputs, anchors, matched_idxs),
+            'classification': self.classification_head_loss(targets, head_outputs, matched_idxs),
+            'bbox_regression': self.regression_head_loss(targets, head_outputs, anchors, matched_idxs),
         }
 
     def forward(self, x):
@@ -65,6 +68,48 @@ class RetinaNetHead(nn.Module):
             'cls_logits': self.classification_head(x),
             'bbox_regression': self.regression_head(x)
         }
+
+
+
+class RetinaNetClassificationHeadLoss(nn.Module):
+
+    def __init__(self):
+        super().__init__()
+        # This is to fix using det_utils.Matcher.BETWEEN_THRESHOLDS in TorchScript.
+        # TorchScript doesn't support class attributes.
+        # https://github.com/pytorch/vision/pull/1697#issuecomment-630255584
+        self.BETWEEN_THRESHOLDS = Matcher.BETWEEN_THRESHOLDS
+
+    def forward(self, targets, head_outputs, matched_idxs):
+        # type: (List[Dict[str, Tensor]], Dict[str, Tensor], List[Tensor]) -> Tensor
+        losses = []
+
+        cls_logits = head_outputs['cls_logits']
+
+        for targets_per_image, cls_logits_per_image, matched_idxs_per_image in zip(targets[0]["labels"], cls_logits, matched_idxs):
+            # determine only the foreground
+            foreground_idxs_per_image = matched_idxs_per_image >= 0
+            num_foreground = foreground_idxs_per_image.sum()
+
+            # create the target classification
+            gt_classes_target = torch.zeros_like(cls_logits_per_image)
+            gt_classes_target[
+                foreground_idxs_per_image,
+                targets_per_image[matched_idxs_per_image[foreground_idxs_per_image]]
+            ] = 1.0
+
+            # find indices for which anchors should be ignored
+            valid_idxs_per_image = matched_idxs_per_image != self.BETWEEN_THRESHOLDS
+
+            # compute the classification loss
+            losses.append(sigmoid_focal_loss(
+                cls_logits_per_image[valid_idxs_per_image],
+                gt_classes_target[valid_idxs_per_image],
+                reduction='sum',
+            ) / max(1, num_foreground))
+
+        return _sum(losses) / len(targets[0]["labels"])
+
 
 
 class RetinaNetClassificationHead(nn.Module):
@@ -154,6 +199,41 @@ class RetinaNetClassificationHead(nn.Module):
             all_cls_logits.append(cls_logits)
 
         return torch.cat(all_cls_logits, dim=1)
+
+class RetinaNetRegressionHeadLoss(nn.Module):
+
+    def __init__(self, regression_head):
+        super().__init__()
+        self.regression_head = regression_head
+
+    def forward(self, targets, head_outputs, anchors, matched_idxs):
+        # type: (List[Dict[str, Tensor]], Dict[str, Tensor], List[Tensor], List[Tensor]) -> Tensor
+        losses = []
+
+        bbox_regression = head_outputs['bbox_regression']
+
+        for targets_per_image, bbox_regression_per_image, anchors_per_image, matched_idxs_per_image in \
+                zip(targets[0]["boxes"], bbox_regression, anchors, matched_idxs):
+            # determine only the foreground indices, ignore the rest
+            foreground_idxs_per_image = torch.where(matched_idxs_per_image >= 0)[0]
+            num_foreground = foreground_idxs_per_image.numel()
+
+            # select only the foreground boxes
+            matched_gt_boxes_per_image = targets_per_image[matched_idxs_per_image[foreground_idxs_per_image]]
+            bbox_regression_per_image = bbox_regression_per_image[foreground_idxs_per_image, :]
+            anchors_per_image = anchors_per_image[foreground_idxs_per_image, :]
+
+            # compute the regression targets
+            target_regression = self.regression_head.box_coder.encode_single(matched_gt_boxes_per_image, anchors_per_image)
+
+            # compute the loss
+            losses.append(torch.nn.functional.l1_loss(
+                bbox_regression_per_image,
+                target_regression,
+                reduction='sum'
+            ) / max(1, num_foreground))
+
+        return _sum(losses) / max(1, len(targets))
 
 
 class RetinaNetRegressionHead(nn.Module):

@@ -6,10 +6,13 @@ import torch.onnx
 import torchvision
 from torch.autograd import Variable
 
-from model.retinanet import retinanet_from_backbone
+from model.retinanet import retinanet_from_backbone, RetinaNet,\
+    RetinaNetClassificationHead, RetinaNetHead, RetinaNetRegressionHead,\
+    RetinaNetClassificationHeadLoss, RetinaNetRegressionHeadLoss
 
 import torch._C as _C
 from distutils.command.check import check
+from model.anchor_utils import AnchorGenerator
 
 TrainingMode = _C._onnx.TrainingMode
 OperatorExportTypes = _C._onnx.OperatorExportTypes
@@ -98,14 +101,16 @@ def main(args):
                       #(inputs, [{'boxes':torch.randn(0,4), 'labels':[torch.randn(0)]}]),
                       args.output,
                       export_params=True, #export trained params
-                      opset_version=13,
+                      opset_version=15,
                       do_constant_folding=True,
                       input_names=['images', 'targets'],
                       output_names=['losses', 'detections'],
                       dynamic_axes=dynamic_axes,
                       training=TrainingMode.TRAINING,
                       operator_export_type=OperatorExportTypes.ONNX_FALLTHROUGH,
-                      keep_initializers_as_inputs=False)
+                      keep_initializers_as_inputs=False,
+                      export_modules_as_functions={RetinaNetRegressionHeadLoss, AnchorGenerator, RetinaNetClassificationHeadLoss})
+ 
 
 #                       operator_export_type=OperatorExportTypes.ONNX)
 #                       operator_export_type=OperatorExportTypes.ONNX_FALLTHROUGH)
