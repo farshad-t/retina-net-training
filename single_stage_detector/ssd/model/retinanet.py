@@ -212,9 +212,10 @@ class RetinaNetRegressionHeadLoss(nn.Module):
 
         bbox_regression = head_outputs['bbox_regression']
 
-        for targets_per_image, bbox_regression_per_image, anchors_per_image, matched_idxs_per_image in \
-                zip(targets[0]["boxes"], bbox_regression, anchors, matched_idxs):
+        for targets_per_image, bbox_regression_per_image, matched_idxs_per_image in \
+                zip(targets[0]["boxes"], bbox_regression, matched_idxs):
             # determine only the foreground indices, ignore the rest
+            anchors_per_image = anchors[0].clone()
             foreground_idxs_per_image = torch.where(matched_idxs_per_image >= 0)[0]
             num_foreground = foreground_idxs_per_image.numel()
 
@@ -278,9 +279,10 @@ class RetinaNetRegressionHead(nn.Module):
 
         bbox_regression = head_outputs['bbox_regression']
 
-        for targets_per_image, bbox_regression_per_image, anchors_per_image, matched_idxs_per_image in \
-                zip(targets[0]["boxes"], bbox_regression, anchors, matched_idxs):
+        for targets_per_image, bbox_regression_per_image, matched_idxs_per_image in \
+                zip(targets[0]["boxes"], bbox_regression, matched_idxs):
             # determine only the foreground indices, ignore the rest
+            anchors_per_image = anchors[0].clone()
             foreground_idxs_per_image = torch.where(matched_idxs_per_image >= 0)[0]
             num_foreground = foreground_idxs_per_image.numel()
 
@@ -327,7 +329,8 @@ class IOU(nn.Module):
 
     def forward(self, anchors, targets):
         matched_idxs = []
-        for anchors_per_image, targets_per_image in zip(anchors, targets[0]['boxes']):
+        for targets_per_image in targets[0]['boxes']:
+            anchors_per_image = anchors[0].clone()
             if targets_per_image.numel() == 0:
                 matched_idxs.append(torch.full((anchors_per_image.size(0),), -1, dtype=torch.int64,
                                                device=anchors_per_image.device))
@@ -513,7 +516,8 @@ class RetinaNet(nn.Module):
         for index in range(num_images):
             box_regression_per_image = [br[index] for br in box_regression]
             logits_per_image = [cl[index] for cl in class_logits]
-            anchors_per_image, image_shape = anchors[index], image_shapes[index]
+            anchors_per_image = anchors[0].clone()
+            image_shape = image_shapes[index]
 
             image_boxes = []
             image_scores = []
