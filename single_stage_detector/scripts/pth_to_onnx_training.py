@@ -8,7 +8,7 @@ from torch.autograd import Variable
 
 from model.retinanet import retinanet_from_backbone, RetinaNet,\
     RetinaNetClassificationHead, RetinaNetHead, RetinaNetRegressionHead,\
-    RetinaNetClassificationHeadLoss, RetinaNetRegressionHeadLoss
+    RetinaNetClassificationHeadLoss, RetinaNetRegressionHeadLoss, IOU
 
 import torch._C as _C
 from distutils.command.check import check
@@ -109,7 +109,7 @@ def main(args):
                       training=TrainingMode.TRAINING,
                       operator_export_type=OperatorExportTypes.ONNX_FALLTHROUGH,
                       keep_initializers_as_inputs=False,
-                      export_modules_as_functions={RetinaNetRegressionHeadLoss, AnchorGenerator, RetinaNetClassificationHeadLoss})
+                      export_modules_as_functions={RetinaNetRegressionHeadLoss, AnchorGenerator, RetinaNetClassificationHeadLoss, IOU})
  
 
 #                       operator_export_type=OperatorExportTypes.ONNX)

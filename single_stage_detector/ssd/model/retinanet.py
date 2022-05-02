@@ -319,6 +319,23 @@ class RetinaNetRegressionHead(nn.Module):
 
         return torch.cat(all_bbox_regression, dim=1)
 
+class IOU(nn.Module):
+
+    def __init__(self, proposal_matcher):
+        super().__init__()
+        self.proposal_matcher = proposal_matcher
+
+    def forward(self, anchors, targets):
+        matched_idxs = []
+        for anchors_per_image, targets_per_image in zip(anchors, targets[0]['boxes']):
+            if targets_per_image.numel() == 0:
+                matched_idxs.append(torch.full((anchors_per_image.size(0),), -1, dtype=torch.int64,
+                                               device=anchors_per_image.device))
+                continue
+
+            match_quality_matrix = box_iou(targets_per_image, anchors_per_image)
+            matched_idxs.append(self.proposal_matcher(match_quality_matrix))
+        return matched_idxs
 
 class RetinaNet(nn.Module):
     """
@@ -449,7 +466,7 @@ class RetinaNet(nn.Module):
                 bg_iou_thresh,
                 allow_low_quality_matches=True,
             )
-        self.proposal_matcher = proposal_matcher
+        self.iou_calc = IOU(proposal_matcher)
 
         self.box_coder = BoxCoder(weights=(1.0, 1.0, 1.0, 1.0))
 
@@ -481,16 +498,7 @@ class RetinaNet(nn.Module):
 
     def compute_loss(self, targets, head_outputs, anchors):
         # type: (List[Dict[str, Tensor]], Dict[str, Tensor], List[Tensor]) -> Dict[str, Tensor]
-        matched_idxs = []
-        for anchors_per_image, targets_per_image in zip(anchors, targets[0]['boxes']):
-            if targets_per_image.numel() == 0:
-                matched_idxs.append(torch.full((anchors_per_image.size(0),), -1, dtype=torch.int64,
-                                               device=anchors_per_image.device))
-                continue
-
-            match_quality_matrix = box_iou(targets_per_image, anchors_per_image)
-            matched_idxs.append(self.proposal_matcher(match_quality_matrix))
-
+        matched_idxs = self.iou_calc(anchors, targets)
         return self.head.compute_loss(targets, head_outputs, anchors, matched_idxs)
 
     def postprocess_detections(self, head_outputs, anchors, image_shapes):
