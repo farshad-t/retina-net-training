@@ -50,6 +50,8 @@ class AnchorGenerator(nn.Module):
         self.aspect_ratios = aspect_ratios
         self.cell_anchors = [self.generate_anchors(size, aspect_ratio)
                              for size, aspect_ratio in zip(sizes, aspect_ratios)]
+        self.dtype=None
+        self.device=None
 
     # TODO: https://github.com/pytorch/pytorch/issues/26792
     # For every (aspect_ratios, scales) combination, output a zero-centered anchor with those values.
@@ -115,13 +117,10 @@ class AnchorGenerator(nn.Module):
 
         return anchors
 
-    def forward(self, image_list: ImageList, feature_maps: List[Tensor]) -> List[Tensor]:
-        grid_sizes = [feature_map.shape[-2:] for feature_map in feature_maps]
-        image_size = image_list.tensors.shape[-2:]
-        dtype, device = feature_maps[0].dtype, feature_maps[0].device
-        strides = [[torch.tensor(image_size[0] // g[0], dtype=torch.int64, device=device),
-                    torch.tensor(image_size[1] // g[1], dtype=torch.int64, device=device)] for g in grid_sizes]
-        self.set_cell_anchors(dtype, device)
+    def forward(self, image_size, grid_sizes) -> List[Tensor]:
+        strides = [[torch.tensor(image_size[0] // g[0], dtype=torch.int64, device=self.device),
+                    torch.tensor(image_size[1] // g[1], dtype=torch.int64, device=self.device)] for g in grid_sizes]
+        self.set_cell_anchors(self.dtype, self.device)
         anchors_over_all_feature_maps = self.grid_anchors(grid_sizes, strides)
         anchors: List[List[torch.Tensor]] = []
         anchors_in_image = [anchors_per_feature_map for anchors_per_feature_map in anchors_over_all_feature_maps]

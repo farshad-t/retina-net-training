@@ -338,6 +338,7 @@ class IOU(nn.Module):
 
             match_quality_matrix = box_iou(targets_per_image, anchors_per_image)
             matched_idxs.append(self.proposal_matcher(match_quality_matrix))
+        matched_idxs = torch.stack(matched_idxs)
         return matched_idxs
 
 class RetinaNet(nn.Module):
@@ -621,7 +622,9 @@ class RetinaNet(nn.Module):
         head_outputs = self.head(features)
 
         # create the set of anchors
-        anchors = self.anchor_generator(image_list, features)
+        grid_sizes = [feature_map.shape[-2:] for feature_map in features]
+        image_size = image_list.tensors.shape[-2:]
+        anchors = self.anchor_generator(image_size, grid_sizes)
 
         losses = {}
         detections: List[Dict[str, Tensor]] = []
